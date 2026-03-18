@@ -1,0 +1,29 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtualenvs & wheel caches
+venv/
+.venv/
+pip-wheel-metadata/
+
+# Git metadata
+.git
+.gitignore
+
+# Local Dockerfile (not needed in prod build context)
+dev.Dockerfile
+
+# Docs, README, tests
+README.md
+
+# IDE settings
+.vscode/
+.idea/
+
+# Environment files
+.env
+
+# macOS
+.DS_Store
