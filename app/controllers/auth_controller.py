@@ -29,7 +29,6 @@ class AuthController:
                 role=signup_data.role,
                 name=signup_data.first_name,
                 last_name=signup_data.last_name,
-                coach_code=signup_data.coach_code
             )
 
             auth_logger.info(

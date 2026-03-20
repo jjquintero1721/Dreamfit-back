@@ -1,7 +1,17 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr, Field
 from typing import List, Dict
 
 from app.utils.enums import ActivityLevel, ExerciseFrequency, Gender, Suplement
+
+
+class CreateMenteeRequest(BaseModel):
+    email: EmailStr
+    password: str
+    first_name: str = Field(..., alias="firstName")
+    last_name: str = Field(..., alias="lastName")
+
+    class Config:
+        populate_by_name = True
 
 
 class PlanInfo(BaseModel):

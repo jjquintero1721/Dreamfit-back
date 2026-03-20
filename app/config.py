@@ -9,7 +9,6 @@ from motor.motor_asyncio import AsyncIOMotorClient
 
 from app.models.user import User
 from app.models.coach_profile import CoachProfile
-from app.models.coach_code import CoachCode
 from app.models.mentee_profile import MenteeProfile
 from app.models.physical_data import WeightRecord, ChestMeasurement, WaistMeasurement, HipsMeasurement, NeckMeasurement, \
     LegMeasurement, ArmMeasurement, CalfMeasurement
@@ -71,7 +70,6 @@ async def init_db():
             document_models=[
                 User,
                 CoachProfile,
-                CoachCode,
                 MenteeProfile,
                 WeightRecord,
                 ChestMeasurement,

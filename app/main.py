@@ -24,35 +24,20 @@ from app.controllers.physical_data_controller import PhysicalDataController
 from app.schemas.response_schemas import ResponsePayload
 from app.controllers.macronutrients_controller import MacronutrientsController
 from app.controllers.meal_plan_controller import MealPlanController
-from app.scheduler.coach_code_scheduler import CoachCodeScheduler
-from app.controllers.coach_code_controller import CoachCodeController
 from app.controllers.system_admin_controller import SystemAdminController
 from app.repositories.coach_profile_repository import CoachProfileRepository
 
 load_dotenv(find_dotenv())
 
-# Instancia global del scheduler
-coach_code_scheduler = None
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 
-    # Startup
-    global coach_code_scheduler
-
     app_logger.info("=== INICIANDO DREAMFIT API ===")
 
     try:
-        # Inicializar base de datos
         await init_db()
         app_logger.info("DATABASE_INITIALIZED | Base de datos conectada")
-
-        # Iniciar el scheduler
-        coach_code_scheduler = CoachCodeScheduler()
-        coach_code_scheduler.start()
-        app_logger.info("SCHEDULER_INITIALIZED | Coach code auto-update enabled")
-
         app_logger.info("=== API INICIADA CORRECTAMENTE ===")
 
     except Exception as e:
@@ -61,11 +46,7 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # Shutdown
     app_logger.info("=== CERRANDO DREAMFIT API ===")
-    if coach_code_scheduler:
-        coach_code_scheduler.shutdown()
-        app_logger.info("SCHEDULER_STOPPED | Coach code scheduler closed")
 
 
 app = FastAPI(title="DreamFit App API", lifespan=lifespan)
@@ -159,7 +140,6 @@ app.include_router(PhysicalDataController.router)
 app.include_router(MacronutrientsController.router)
 app.include_router(MealPlanController.router)
 app.include_router(UserController.router)
-app.include_router(CoachCodeController.router)
 app.include_router(SystemAdminController.router)
 
 
@@ -192,30 +172,26 @@ async def on_shutdown():
 
 @app.get("/health")
 async def health_check():
-    """Endpoint para verificar el estado de la aplicación y el scheduler"""
-    scheduler_status = "running" if coach_code_scheduler and coach_code_scheduler.scheduler.running else "stopped"
-
+    """Endpoint para verificar el estado de la aplicación"""
     app_logger.info("HEALTH_CHECK | Status requested")
-
     return {
         "status": "healthy",
         "service": "dreamfit-api",
-        "scheduler_status": scheduler_status,
         "timestamp": time.time()
     }
 
 
-@app.get("/sentry-debug")
-async def trigger_sentry_error():
-    """
-    Endpoint de prueba para verificar que Sentry está funcionando correctamente.
-    Solo debe usarse en desarrollo.
+#@app.get("/sentry-debug")
+#async def trigger_sentry_error():
+    #"""
+    #Endpoint de prueba para verificar que Sentry está funcionando correctamente.
+    #Solo debe usarse en desarrollo.
 
-    IMPORTANTE: Deshabilitar o eliminar este endpoint en producción.
-    """
-    app_logger.info("SENTRY_DEBUG | Triggering test error")
-    division_by_zero = 1 / 0
-    return {"message": "This should not be returned"}
+    #IMPORTANTE: Deshabilitar o eliminar este endpoint en producción.
+    #"""
+    #app_logger.info("SENTRY_DEBUG | Triggering test error")
+    #division_by_zero = 1 / 0
+    #return {"message": "This should not be returned"}
 
 
 async def _start_daily_reset_job():

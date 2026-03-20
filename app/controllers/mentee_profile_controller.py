@@ -6,10 +6,11 @@ from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 
 from app.services.mentee_profile_service import MenteeProfileService
+from app.services.user_service import UserService
 from app.schemas.physical_data_schema import RequestPhysicalData
 from app.schemas.response_schemas import ResponsePayload
 from app.schemas.mentee_profile_schema import MenteeProfileResponse, UpdateMenteeProfileRequest, \
-    MenteeProfileUpdateResponse
+    MenteeProfileUpdateResponse, CreateMenteeRequest
 from app.security.auth_middleware import require_roles
 from app.utils.requestor_utils import RequestorUtils
 from app.utils.enums import RoleName
@@ -19,6 +20,56 @@ mentee_logger = logging.getLogger("dreamfit_api.mentee_profile")
 
 class MenteeProfileController:
     router = APIRouter(prefix="/mentees", tags=["Mentees"])
+
+    @staticmethod
+    @router.post("/")
+    async def create_mentee(
+            mentee_data: CreateMenteeRequest,
+            request: Request,
+            coach_id: str = Depends(require_roles([RoleName.coach]))
+    ):
+        client_ip = request.client.host if request.client else "unknown"
+
+        mentee_logger.info(
+            f"CREATE_MENTEE | CoachID: {coach_id} | Email: {mentee_data.email} | IP: {client_ip}"
+        )
+
+        try:
+            await UserService.create_mentee_by_coach(
+                coach_id=coach_id,
+                email=mentee_data.email,
+                password=mentee_data.password,
+                name=mentee_data.first_name,
+                last_name=mentee_data.last_name,
+            )
+
+            mentee_logger.info(
+                f"CREATE_MENTEE_SUCCESS | CoachID: {coach_id} | Email: {mentee_data.email} | IP: {client_ip}"
+            )
+
+            return JSONResponse(
+                status_code=status.HTTP_201_CREATED,
+                content=ResponsePayload.create("Asesorado creado exitosamente", {})
+            )
+
+        except HTTPException as e:
+            mentee_logger.warning(
+                f"CREATE_MENTEE_HTTP_ERROR | CoachID: {coach_id} | "
+                f"Error: {e.detail} | Status: {e.status_code} | IP: {client_ip}"
+            )
+            return JSONResponse(
+                status_code=e.status_code,
+                content=ResponsePayload.create(e.detail, {})
+            )
+        except Exception as e:
+            mentee_logger.error(
+                f"CREATE_MENTEE_ERROR | CoachID: {coach_id} | "
+                f"Unexpected error: {str(e)} | IP: {client_ip}"
+            )
+            return JSONResponse(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                content=ResponsePayload.create("Internal server error", {})
+            )
 
     @staticmethod
     @router.get("/{coach_id}")

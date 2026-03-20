@@ -7,12 +7,10 @@ from bson import ObjectId
 from app.config import ACCESS_TOKEN_EXPIRE_MINUTES, REFRESH_TOKEN_EXPIRE_DAYS, SECRET_KEY, ALGORITHM
 from app.repositories.user_repository import UserRepository
 from app.repositories.coach_profile_repository import CoachProfileRepository
-from app.repositories.coach_code_repository import CoachCodeRepository
 from app.repositories.mentee_profile_repository import MenteeProfileRepository
 from app.repositories.membership_repository import MembershipRepository
 from app.services.content_service import ContentService
 from app.models.user import User
-from app.models.coach_code import CoachCode
 from app.utils.auth_utils import AuthUtils
 from app.utils.enums import RoleName
 
@@ -21,7 +19,7 @@ user_logger = logging.getLogger("dreamfit_api.user_service")
 
 class UserService:
     @classmethod
-    async def signup(cls, email: str, password: str, role: str, name: str, last_name: str, coach_code: str = ""):
+    async def signup(cls, email: str, password: str, role: str, name: str, last_name: str):
         user_logger.info(f"SIGNUP_START | Email: {email} | Role: {role}")
         user = None
 
@@ -32,8 +30,12 @@ class UserService:
             cls._validate_role(RoleName(role).value)
             user_logger.debug(f"ROLE_VALIDATION_PASSED | Role: {role}")
 
-            await cls._validate_coach_code(RoleName(role).value, coach_code)
-            user_logger.debug(f"COACH_CODE_VALIDATION_PASSED | Role: {role}")
+            if role == RoleName.mentee:
+                user_logger.warning(f"SIGNUP_MENTEE_FORBIDDEN | Email: {email}")
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Los asesorados deben ser registrados por su entrenador"
+                )
 
             hashed_password = AuthUtils.get_password_hash(password)
             user_data = {
@@ -47,12 +49,8 @@ class UserService:
             user_logger.info(f"USER_CREATED | UserID: {user.id} | Email: {email}")
 
             try:
-                if role == RoleName.coach:
-                    await cls._create_coach_profile(user, name, last_name)
-                    user_logger.info(f"COACH_PROFILE_CREATED | UserID: {user.id}")
-                elif role == RoleName.mentee:
-                    await cls._create_mentee_profile(user, name, last_name, coach_code)
-                    user_logger.info(f"MENTEE_PROFILE_CREATED | UserID: {user.id}")
+                await cls._create_coach_profile(user, name, last_name)
+                user_logger.info(f"COACH_PROFILE_CREATED | UserID: {user.id}")
             except Exception as profile_error:
                 user_logger.error(
                     f"PROFILE_CREATION_FAILED | UserID: {user.id} | "
@@ -107,36 +105,6 @@ class UserService:
         user_logger.debug(f"ROLE_VALID | Role: {role}")
 
     @staticmethod
-    async def _validate_coach_code(role: str, coach_code: str):
-        if role == RoleName.mentee:
-            user_logger.debug(f"VALIDATING_COACH_CODE | Code: {coach_code}")
-
-            if not coach_code:
-                user_logger.warning("COACH_CODE_MISSING")
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Coach code not provided"
-                )
-
-            try:
-                coach_code_obj = await CoachCodeRepository.get_by_code(coach_code)
-                if not coach_code_obj:
-                    user_logger.warning(f"COACH_CODE_INVALID | Code: {coach_code}")
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Invalid coach code provided"
-                    )
-                user_logger.debug(f"COACH_CODE_VALID | Code: {coach_code} | CoachID: {coach_code_obj.user_id}")
-            except HTTPException:
-                raise
-            except Exception as e:
-                user_logger.error(f"COACH_CODE_VALIDATION_ERROR | Code: {coach_code} | Error: {str(e)}")
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Error validating coach code"
-                )
-
-    @staticmethod
     async def _create_coach_profile(user: User, name: str, last_name: str):
         user_logger.info(f"CREATING_COACH_PROFILE | UserID: {user.id}")
         try:
@@ -148,8 +116,6 @@ class UserService:
             }
 
             await CoachProfileRepository.create(profile_data)
-            coach_code_obj = CoachCode.create_code(user_id=str(user.id))
-            await CoachCodeRepository.create(coach_code_obj)
 
             # Asignar membresía free por defecto con 1 año de duración
             start_date = datetime.now()
@@ -162,7 +128,7 @@ class UserService:
                 "end_date": end_date,
             })
 
-            user_logger.info(f"COACH_PROFILE_COMPLETE | UserID: {user.id} | Code: {coach_code_obj.code}")
+            user_logger.info(f"COACH_PROFILE_COMPLETE | UserID: {user.id}")
         except Exception as e:
             user_logger.error(f"COACH_PROFILE_ERROR | UserID: {user.id} | Error: {str(e)}")
             raise HTTPException(
@@ -170,38 +136,55 @@ class UserService:
                 detail="Error creating coach profile"
             )
 
-    @staticmethod
-    async def _create_mentee_profile(user: User, name: str, last_name: str, coach_code: str):
-        user_logger.info(f"CREATING_MENTEE_PROFILE | UserID: {user.id} | CoachCode: {coach_code}")
+    @classmethod
+    async def create_mentee_by_coach(cls, coach_id: str, email: str, password: str, name: str, last_name: str):
+        user_logger.info(f"CREATE_MENTEE_BY_COACH_START | CoachID: {coach_id} | Email: {email}")
+        user = None
+
         try:
-            coach_code_obj = await CoachCodeRepository.get_by_code(coach_code)
+            await cls._ensure_email_is_unique(email)
+            await cls._ensure_coach_can_accept_mentee(coach_id)
 
-            await UserService._ensure_coach_can_accept_mentee(coach_code_obj.user_id)
-
-            profile_data = {
-                "user_id": str(user.id),
-                "name": name,
-                "last_name": last_name,
-                "coach_id": coach_code_obj.user_id,
-                "userPlans": {
-                    "mealPlan": {
-                        "active": False,
-                        "planId": ""
-                    },
-                    "workoutsPlan": {
-                        "active": False,
-                        "planId": ""
-                    }
-                }
+            hashed_password = AuthUtils.get_password_hash(password)
+            user_data = {
+                "email": email,
+                "password": hashed_password,
+                "role": RoleName.mentee,
+                "created_at": datetime.now(timezone.utc)
             }
 
-            await MenteeProfileRepository.create(profile_data)
-            user_logger.info(f"MENTEE_PROFILE_COMPLETE | UserID: {user.id} | CoachID: {coach_code_obj.user_id}")
+            user = await UserRepository.create(user_data)
+            user_logger.info(f"MENTEE_USER_CREATED | UserID: {user.id} | CoachID: {coach_id}")
+
+            try:
+                profile_data = {
+                    "user_id": str(user.id),
+                    "name": name,
+                    "last_name": last_name,
+                    "coach_id": coach_id,
+                    "userPlans": {
+                        "mealPlan": {"active": False, "planId": ""},
+                        "workoutsPlan": {"active": False, "planId": ""}
+                    }
+                }
+                await MenteeProfileRepository.create(profile_data)
+                user_logger.info(f"MENTEE_PROFILE_CREATED | UserID: {user.id} | CoachID: {coach_id}")
+            except Exception as profile_error:
+                user_logger.error(
+                    f"MENTEE_PROFILE_CREATION_FAILED | UserID: {user.id} | "
+                    f"Rolling back | Error: {str(profile_error)}"
+                )
+                await UserRepository.delete(user)
+                raise profile_error
+
+        except HTTPException as e:
+            user_logger.error(f"CREATE_MENTEE_HTTP_ERROR | CoachID: {coach_id} | Error: {e.detail}")
+            raise e
         except Exception as e:
-            user_logger.error(f"MENTEE_PROFILE_ERROR | UserID: {user.id} | Error: {str(e)}")
+            user_logger.error(f"CREATE_MENTEE_UNEXPECTED_ERROR | CoachID: {coach_id} | Error: {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Error creating mentee profile"
+                detail="Error al crear el asesorado"
             )
 
     @staticmethod
@@ -271,11 +254,7 @@ class UserService:
 
             if user.role == RoleName.coach:
                 user_data = await CoachProfileRepository.get_by_user_id(str(user.id))
-                coach_code = await CoachCodeRepository.get_by_user_id(str(user.id))
-                token_data.update({
-                    "firstName": user_data.name,
-                    "coachCode": coach_code.code
-                })
+                token_data.update({"firstName": user_data.name})
                 user_logger.debug(f"COACH_DATA_LOADED | UserID: {user.id}")
 
             elif user.role == RoleName.mentee:
@@ -351,11 +330,7 @@ class UserService:
 
             if user.role == RoleName.coach:
                 user_data = await CoachProfileRepository.get_by_user_id(str(user.id))
-                coach_code = await CoachCodeRepository.get_by_user_id(str(user.id))
-                token_data.update({
-                    "firstName": user_data.name,
-                    "coachCode": coach_code.code
-                })
+                token_data.update({"firstName": user_data.name})
             elif user.role == RoleName.mentee:
                 user_data = await MenteeProfileRepository.get_by_user_id(str(user.id))
                 token_data.update({"firstName": user_data.name})
